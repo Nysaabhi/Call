@@ -1,3 +1,5 @@
+<!DOCTYPE html>
+<html>
 <head>
     <title>Internet Dialer</title>
     <style>
@@ -31,7 +33,16 @@
             margin-bottom: 20px;
         }
 
-        #phoneNumber {
+        #userId {
+            width: 100%;
+            padding: 10px;
+            font-size: 18px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        #targetId {
             width: 100%;
             padding: 10px;
             font-size: 24px;
@@ -71,14 +82,6 @@
             transform: scale(0.95);
         }
 
-        .key span {
-            font-size: 12px;
-            color: #666;
-            display: block;
-            text-align: center;
-            line-height: 1;
-        }
-
         .actions {
             display: flex;
             justify-content: center;
@@ -105,14 +108,6 @@
             display: none;
         }
 
-        .call-btn:hover {
-            background: #43A047;
-        }
-
-        .hangup-btn:hover {
-            background: #E53935;
-        }
-
         .status {
             text-align: center;
             margin-top: 10px;
@@ -120,77 +115,123 @@
             font-size: 14px;
         }
 
-        body > h1:first-of-type:not(.heading) {
-    writing-mode: vertical-rl; /* Rotates text vertically */
-    text-orientation: upright; /* Keeps characters upright */
-    display: block !important; /* Ensure it stays visible for styling */
-}
-
-.markdown-body h1:first-child {
-    writing-mode: vertical-rl; /* Rotates text vertically */
-    text-orientation: upright; /* Keeps characters upright */
-    display: block !important; /* Ensure visibility */
-}
-
-.position-relative h1:first-child {
-    writing-mode: vertical-rl; /* Rotates text vertically */
-    text-orientation: upright; /* Keeps characters upright */
-    display: block !important; /* Ensure visibility */
-}
-
+        #incomingCall {
+            display: none;
+            text-align: center;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="dialer">
         <div class="screen">
-            <input type="tel" id="phoneNumber" placeholder="Enter number" readonly>
+            <input type="text" id="userId" placeholder="Enter your ID">
+            <input type="text" id="targetId" placeholder="Enter caller ID" readonly>
         </div>
         <div class="keypad">
             <div class="key" onclick="addNumber('1')">1</div>
-            <div class="key" onclick="addNumber('2')">2<span>ABC</span></div>
-            <div class="key" onclick="addNumber('3')">3<span>DEF</span></div>
-            <div class="key" onclick="addNumber('4')">4<span>GHI</span></div>
-            <div class="key" onclick="addNumber('5')">5<span>JKL</span></div>
-            <div class="key" onclick="addNumber('6')">6<span>MNO</span></div>
-            <div class="key" onclick="addNumber('7')">7<span>PQRS</span></div>
-            <div class="key" onclick="addNumber('8')">8<span>TUV</span></div>
-            <div class="key" onclick="addNumber('9')">9<span>WXYZ</span></div>
+            <div class="key" onclick="addNumber('2')">2</div>
+            <div class="key" onclick="addNumber('3')">3</div>
+            <div class="key" onclick="addNumber('4')">4</div>
+            <div class="key" onclick="addNumber('5')">5</div>
+            <div class="key" onclick="addNumber('6')">6</div>
+            <div class="key" onclick="addNumber('7')">7</div>
+            <div class="key" onclick="addNumber('8')">8</div>
+            <div class="key" onclick="addNumber('9')">9</div>
             <div class="key" onclick="addNumber('*')">*</div>
-            <div class="key" onclick="addNumber('0')">0<span>+</span></div>
+            <div class="key" onclick="addNumber('0')">0</div>
             <div class="key" onclick="addNumber('#')">#</div>
         </div>
         <div class="actions">
             <button class="call-btn" onclick="startCall()">Call</button>
             <button class="hangup-btn" onclick="endCall()">End</button>
         </div>
+        <div id="incomingCall">
+            <p>Incoming call from <span id="callerId"></span></p>
+            <button onclick="answerCall()">Answer</button>
+            <button onclick="rejectCall()">Reject</button>
+        </div>
         <div class="status" id="callStatus"></div>
     </div>
 
     <script>
-        let pc = null; // RTCPeerConnection
+        let pc = null;
         let localStream = null;
-        
-        // Add number to display
-        function addNumber(num) {
-            const phoneNumber = document.getElementById('phoneNumber');
-            phoneNumber.value += num;
+        let socket = null;
+        let userId = null;
+
+        // Connect to signaling server
+        function connectSignaling() {
+            // Replace with your WebSocket server URL
+            socket = new WebSocket('wss://your-signaling-server.com');
+
+            socket.onopen = () => {
+                const id = document.getElementById('userId').value;
+                socket.send(JSON.stringify({
+                    type: 'register',
+                    userId: id
+                }));
+                userId = id;
+                updateStatus('Connected');
+            };
+
+            socket.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                handleSignalingMessage(message);
+            };
         }
 
-        // Initialize WebRTC connection
+        // Handle incoming signaling messages
+        async function handleSignalingMessage(message) {
+            switch(message.type) {
+                case 'offer':
+                    showIncomingCall(message.from);
+                    await handleOffer(message);
+                    break;
+                case 'answer':
+                    await handleAnswer(message);
+                    break;
+                case 'candidate':
+                    await handleCandidate(message);
+                    break;
+                case 'hangup':
+                    endCall();
+                    break;
+            }
+        }
+
+        // Initialize WebRTC
         async function initializeWebRTC() {
             try {
-                // Get user media (microphone)
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 
-                // Create RTCPeerConnection
                 const configuration = {
                     iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' }
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'turn:your-turn-server.com', 
+                          username: 'username', 
+                          credential: 'password' }
                     ]
                 };
+                
                 pc = new RTCPeerConnection(configuration);
                 
-                // Add local stream to connection
+                pc.onicecandidate = ({candidate}) => {
+                    if (candidate) {
+                        socket.send(JSON.stringify({
+                            type: 'candidate',
+                            candidate: candidate,
+                            target: document.getElementById('targetId').value
+                        }));
+                    }
+                };
+
+                pc.ontrack = (event) => {
+                    const remoteAudio = new Audio();
+                    remoteAudio.srcObject = event.streams[0];
+                    remoteAudio.play();
+                };
+
                 localStream.getTracks().forEach(track => {
                     pc.addTrack(track, localStream);
                 });
@@ -205,30 +246,32 @@
 
         // Start call
         async function startCall() {
-            const phoneNumber = document.getElementById('phoneNumber').value;
-            if (!phoneNumber) {
-                updateStatus('Please enter a phone number');
+            const targetId = document.getElementById('targetId').value;
+            if (!targetId) {
+                updateStatus('Please enter caller ID');
                 return;
+            }
+
+            if (!socket) {
+                connectSignaling();
             }
 
             if (!await initializeWebRTC()) return;
 
             try {
-                // Create and set local description
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
 
-                // Show calling status
+                socket.send(JSON.stringify({
+                    type: 'offer',
+                    offer: offer,
+                    target: targetId,
+                    from: userId
+                }));
+
                 updateStatus('Calling...');
                 document.querySelector('.call-btn').style.display = 'none';
                 document.querySelector('.hangup-btn').style.display = 'block';
-
-                // In a real implementation, you would:
-                // 1. Send the offer to a signaling server
-                // 2. Receive answer from remote peer
-                // 3. Set remote description
-                // 4. Exchange ICE candidates
-
             } catch (error) {
                 console.error('Error starting call:', error);
                 updateStatus('Error: Could not establish call');
@@ -236,8 +279,62 @@
             }
         }
 
+        // Handle incoming call
+        function showIncomingCall(callerId) {
+            document.getElementById('callerId').textContent = callerId;
+            document.getElementById('incomingCall').style.display = 'block';
+        }
+
+        // Answer call
+        async function answerCall() {
+            if (!await initializeWebRTC()) return;
+
+            try {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                socket.send(JSON.stringify({
+                    type: 'answer',
+                    answer: answer,
+                    target: document.getElementById('callerId').textContent
+                }));
+
+                document.getElementById('incomingCall').style.display = 'none';
+                document.querySelector('.call-btn').style.display = 'none';
+                document.querySelector('.hangup-btn').style.display = 'block';
+                updateStatus('Connected');
+            } catch (error) {
+                console.error('Error answering call:', error);
+                updateStatus('Error: Could not answer call');
+                endCall();
+            }
+        }
+
+        // Handle offer
+        async function handleOffer(message) {
+            await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
+        }
+
+        // Handle answer
+        async function handleAnswer(message) {
+            await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+            updateStatus('Connected');
+        }
+
+        // Handle ICE candidate
+        async function handleCandidate(message) {
+            await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+        }
+
         // End call
         function endCall() {
+            if (socket) {
+                socket.send(JSON.stringify({
+                    type: 'hangup',
+                    target: document.getElementById('targetId').value
+                }));
+            }
+
             if (pc) {
                 pc.close();
                 pc = null;
@@ -249,19 +346,32 @@
 
             document.querySelector('.call-btn').style.display = 'block';
             document.querySelector('.hangup-btn').style.display = 'none';
+            document.getElementById('incomingCall').style.display = 'none';
             updateStatus('Call ended');
         }
 
-        // Update status message
+        // Reject call
+        function rejectCall() {
+            document.getElementById('incomingCall').style.display = 'none';
+            endCall();
+        }
+
+        // Add number to display
+        function addNumber(num) {
+            const targetId = document.getElementById('targetId');
+            targetId.value += num;
+        }
+
+        // Update status
         function updateStatus(message) {
             document.getElementById('callStatus').textContent = message;
         }
 
-        // Handle backspace with keyboard
+        // Handle backspace
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Backspace') {
-                const phoneNumber = document.getElementById('phoneNumber');
-                phoneNumber.value = phoneNumber.value.slice(0, -1);
+                const targetId = document.getElementById('targetId');
+                targetId.value = targetId.value.slice(0, -1);
             }
         });
     </script>
