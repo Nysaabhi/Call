@@ -121,6 +121,25 @@
             color: #666;
             font-size: 14px;
         }
+
+        body > h1:first-of-type:not(.heading) {
+    writing-mode: vertical-rl; /* Rotates text vertically */
+    text-orientation: upright; /* Keeps characters upright */
+    display: block !important; /* Ensure it stays visible for styling */
+}
+
+.markdown-body h1:first-child {
+    writing-mode: vertical-rl; /* Rotates text vertically */
+    text-orientation: upright; /* Keeps characters upright */
+    display: block !important; /* Ensure visibility */
+}
+
+.position-relative h1:first-child {
+    writing-mode: vertical-rl; /* Rotates text vertically */
+    text-orientation: upright; /* Keeps characters upright */
+    display: block !important; /* Ensure visibility */
+}
+
     </style>
 </head>
 <body>
